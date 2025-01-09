@@ -26,7 +26,7 @@ class EventStreamSubscriber(str, Enum):
 
 async def session_exists(sid: str, file_store: FileStore) -> bool:
     try:
-        await call_sync_from_async(file_store.list, f'sessions/{sid}')
+        await call_sync_from_async(file_store.list, f'sessions/{sid}/')
         return True
     except FileNotFoundError:
         return False
@@ -50,6 +50,7 @@ class AsyncEventStreamWrapper:
 @dataclass
 class EventStream:
     sid: str
+    esid: str
     file_store: FileStore
     # For each subscriber ID, there is a map of callback functions - useful
     # when there are multiple listeners
@@ -59,7 +60,7 @@ class EventStream:
 
     def __post_init__(self) -> None:
         try:
-            events = self.file_store.list(f'sessions/{self.sid}/events')
+            events = self.file_store.list(f'sessions/{self.sid}/events/{self.esid}/')
         except FileNotFoundError:
             logger.debug(f'No events found for session {self.sid}')
             self._cur_id = 0
@@ -72,7 +73,7 @@ class EventStream:
                 self._cur_id = id + 1
 
     def _get_filename_for_id(self, id: int) -> str:
-        return f'sessions/{self.sid}/events/{id}.json'
+        return f'sessions/{self.sid}/events/{self.esid}/{id}.json'
 
     @staticmethod
     def _get_id_from_filename(filename: str) -> int:
@@ -174,6 +175,17 @@ class EventStream:
         del self._subscribers[subscriber_id][callback_id]
 
     def add_event(self, event: Event, source: EventSource):
+        # if isinstance(event, Action):
+        #     logger.info(
+        #         f'From Source: {event.src_id}, Event Stream: {event.esid}, Action: {event}'
+        #     )
+        # elif isinstance(event, Observation):
+        #     logger.info(
+        #         f'From Source: {event.src_id}, Event Stream: {event.esid}, Observation: {event}'
+        #     )
+        # else:
+        #     logger.info(f'Event: {event}')
+
         try:
             asyncio.get_running_loop().create_task(self._async_add_event(event, source))
         except RuntimeError:
@@ -199,12 +211,12 @@ class EventStream:
             callbacks = self._subscribers[key]
             for callback_id in callbacks:
                 callback = callbacks[callback_id]
-                tasks.append(asyncio.create_task(callback(event)))
+                tasks.append(asyncio.create_task(callback(self.esid, event)))
         if tasks:
             await asyncio.wait(tasks)
 
     def _callback(self, callback: Callable, event: Event):
-        asyncio.run(callback(event))
+        asyncio.run(callback(self.esid, event))
 
     def filtered_events_by_source(self, source: EventSource):
         for event in self.get_events():
@@ -299,9 +311,3 @@ class EventStream:
                 break
 
         return matching_events
-
-    def clear(self):
-        self.file_store.delete(f'sessions/{self.sid}')
-        self._cur_id = 0
-        # self._subscribers = {}
-        self.__post_init__()

@@ -86,6 +86,7 @@ class Runtime(FileEditRuntimeMixin):
     initial_env_vars: dict[str, str]
     attach_to_existing: bool
     status_callback: Callable | None
+    event_stream: dict[str, EventStream]
 
     def __init__(
         self,
@@ -99,8 +100,9 @@ class Runtime(FileEditRuntimeMixin):
         headless_mode: bool = False,
     ):
         self.sid = sid
-        self.event_stream = event_stream
-        self.event_stream.subscribe(
+        self.event_stream = {}
+        self.event_stream[event_stream.esid] = event_stream
+        self.event_stream[event_stream.esid].subscribe(
             EventStreamSubscriber.RUNTIME, self.on_event, self.sid
         )
         self.plugins = (
@@ -162,7 +164,7 @@ class Runtime(FileEditRuntimeMixin):
                 # Note: json.dumps gives us nice escaping for free
                 code += f'os.environ["{key}"] = {json.dumps(value)}\n'
             code += '\n'
-            obs = self.run_ipython(IPythonRunCellAction(code))
+            obs = self.run_ipython(IPythonRunCellAction(code=code))
             self.log('debug', f'Added env vars to IPython: code={code}, obs={obs}')
 
         # Add env vars to the Bash shell
@@ -180,7 +182,7 @@ class Runtime(FileEditRuntimeMixin):
                 f'Failed to add env vars [{env_vars}] to environment: {obs.content}'
             )
 
-    async def on_event(self, event: Event) -> None:
+    async def on_event(self, esid: str, event: Event) -> None:
         if isinstance(event, Action):
             # set timeout to default if not set
             if event.timeout is None:
@@ -211,7 +213,9 @@ class Runtime(FileEditRuntimeMixin):
 
             # this might be unnecessary, since source should be set by the event stream when we're here
             source = event.source if event.source else EventSource.AGENT
-            self.event_stream.add_event(observation, source)  # type: ignore[arg-type]
+            observation.src_id = event.src_id
+            observation.esid = esid
+            self.event_stream[esid].add_event(observation, source)  # type: ignore[arg-type]
 
     def clone_repo(self, github_token: str | None, selected_repository: str | None):
         if not github_token or not selected_repository:
@@ -260,29 +264,43 @@ class Runtime(FileEditRuntimeMixin):
         If the action is not supported by the current runtime, an ErrorObservation is returned.
         """
         if not action.runnable:
-            return NullObservation('')
+            return NullObservation(content='', src_id='runtime', esid=action.esid)
         if (
             hasattr(action, 'confirmation_state')
             and action.confirmation_state
             == ActionConfirmationStatus.AWAITING_CONFIRMATION
         ):
-            return NullObservation('')
+            return NullObservation(content='', src_id='runtime', esid=action.esid)
         action_type = action.action  # type: ignore[attr-defined]
         if action_type not in ACTION_TYPE_TO_CLASS:
-            return ErrorObservation(f'Action {action_type} does not exist.')
+            return ErrorObservation(
+                content=f'Action {action_type} does not exist.',
+                src_id='runtime',
+                esid=action.esid,
+            )
         if not hasattr(self, action_type):
             return ErrorObservation(
-                f'Action {action_type} is not supported in the current runtime.'
+                content=f'Action {action_type} is not supported in the current runtime.',
+                src_id='runtime',
+                esid=action.esid,
             )
         if (
             getattr(action, 'confirmation_state', None)
             == ActionConfirmationStatus.REJECTED
         ):
             return UserRejectObservation(
-                'Action has been rejected by the user! Waiting for further user input.'
+                content='Action has been rejected by the user! Waiting for further user input.',
+                src_id='runtime',
+                esid=action.esid,
             )
         observation = getattr(self, action_type)(action)
         return observation
+
+    def add_event_stream(self, event_stream: EventStream):
+        self.event_stream[event_stream.esid] = event_stream
+        self.event_stream[event_stream.esid].subscribe(
+            EventStreamSubscriber.RUNTIME, self.on_event, self.sid
+        )
 
     # ====================================================================
     # Context manager

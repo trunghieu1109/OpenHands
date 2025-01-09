@@ -1,0 +1,8 @@
+You are a senior software engineering and have experience in some positions such as solution architecture, project manager, v.v. So, please a static website to introduce about SanFrancisco. This website includes the following features:
+- Address
+- Culture
+- Food
+- People
+- Tourism
+
+Each of feature is covered in two sections, and contains many interesting information about it. You MUST make the UI more modern and user-friendly. You could search information about each feature in the Internet by delegating to other agent.

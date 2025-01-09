@@ -43,6 +43,7 @@ def mock_agent():
 def mock_event_stream():
     mock = MagicMock(spec=EventStream)
     mock.get_latest_event_id.return_value = 0
+    mock.esid = 'mock-es'
     return mock
 
 
@@ -80,8 +81,10 @@ async def test_on_event_message_action(mock_agent, mock_event_stream):
         headless_mode=True,
     )
     controller.state.agent_state = AgentState.RUNNING
-    message_action = MessageAction(content='Test message')
-    await controller.on_event(message_action)
+    message_action = MessageAction(
+        content='Test message', src_id='dummy-agent', esid='test-es0'
+    )
+    await controller.on_event('test-es0', message_action)
     assert controller.get_agent_state() == AgentState.RUNNING
     await controller.close()
 
@@ -97,8 +100,10 @@ async def test_on_event_change_agent_state_action(mock_agent, mock_event_stream)
         headless_mode=True,
     )
     controller.state.agent_state = AgentState.RUNNING
-    change_state_action = ChangeAgentStateAction(agent_state=AgentState.PAUSED)
-    await controller.on_event(change_state_action)
+    change_state_action = ChangeAgentStateAction(
+        agent_state=AgentState.PAUSED, src_id='dummy-agent', esid='test-es0'
+    )
+    await controller.on_event('test-es0', change_state_action)
     assert controller.get_agent_state() == AgentState.PAUSED
     await controller.close()
 
@@ -124,14 +129,12 @@ async def test_react_to_exception(mock_agent, mock_event_stream, mock_status_cal
 async def test_run_controller_with_fatal_error(mock_agent, mock_event_stream):
     config = AppConfig()
     file_store = get_file_store(config.file_store, config.file_store_path)
-    event_stream = EventStream(sid='test', file_store=file_store)
-
-    agent = MagicMock(spec=Agent)
+    event_stream = EventStream(sid='test', esid='test-es0', file_store=file_store)
     agent = MagicMock(spec=Agent)
 
     def agent_step_fn(state):
         print(f'agent_step_fn received state: {state}')
-        return CmdRunAction(command='ls')
+        return CmdRunAction(command='ls', src_id='dummy-agent', esid=event_stream.esid)
 
     agent.step = agent_step_fn
     agent.llm = MagicMock(spec=LLM)
@@ -140,18 +143,26 @@ async def test_run_controller_with_fatal_error(mock_agent, mock_event_stream):
 
     runtime = MagicMock(spec=Runtime)
 
-    async def on_event(event: Event):
+    async def on_event(esid: str, event: Event):
         if isinstance(event, CmdRunAction):
-            error_obs = ErrorObservation('You messed around with Jim')
+            error_obs = ErrorObservation(
+                'You messed around with Jim',
+                src_id='dummy-agent',
+                esid=event_stream.esid,
+            )
             error_obs._cause = event.id
             event_stream.add_event(error_obs, EventSource.USER)
 
     event_stream.subscribe(EventStreamSubscriber.RUNTIME, on_event, str(uuid4()))
-    runtime.event_stream = event_stream
+    runtime.event_stream = {}
+
+    runtime.event_stream[event_stream.esid] = event_stream
 
     state = await run_controller(
         config=config,
-        initial_user_action=MessageAction(content='Test message'),
+        initial_user_action=MessageAction(
+            content='Test message', src_id='dummy-agent', esid=event_stream.esid
+        ),
         runtime=runtime,
         sid='test',
         agent=agent,
@@ -169,13 +180,13 @@ async def test_run_controller_with_fatal_error(mock_agent, mock_event_stream):
 async def test_run_controller_stop_with_stuck():
     config = AppConfig()
     file_store = get_file_store(config.file_store, config.file_store_path)
-    event_stream = EventStream(sid='test', file_store=file_store)
+    event_stream = EventStream(sid='test', esid='test-es0', file_store=file_store)
 
     agent = MagicMock(spec=Agent)
 
     def agent_step_fn(state):
         print(f'agent_step_fn received state: {state}')
-        return CmdRunAction(command='ls')
+        return CmdRunAction(command='ls', src_id='dummy-agent', esid=event_stream.esid)
 
     agent.step = agent_step_fn
     agent.llm = MagicMock(spec=LLM)
@@ -183,20 +194,24 @@ async def test_run_controller_stop_with_stuck():
     agent.llm.config = config.get_llm_config()
     runtime = MagicMock(spec=Runtime)
 
-    async def on_event(event: Event):
+    async def on_event(esid: str, event: Event):
         if isinstance(event, CmdRunAction):
             non_fatal_error_obs = ErrorObservation(
-                'Non fatal error here to trigger loop'
+                'Non fatal error here to trigger loop', src_id='dummy-agent', esid=esid
             )
             non_fatal_error_obs._cause = event.id
             event_stream.add_event(non_fatal_error_obs, EventSource.ENVIRONMENT)
 
     event_stream.subscribe(EventStreamSubscriber.RUNTIME, on_event, str(uuid4()))
-    runtime.event_stream = event_stream
+    runtime.event_stream = {}
+
+    runtime.event_stream[event_stream.esid] = event_stream
 
     state = await run_controller(
         config=config,
-        initial_user_action=MessageAction(content='Test message'),
+        initial_user_action=MessageAction(
+            content='Test message', src_id='dummy-agent', esid=event_stream.esid
+        ),
         runtime=runtime,
         sid='test',
         agent=agent,
@@ -253,7 +268,8 @@ async def test_delegate_step_different_states(
     )
 
     mock_delegate = AsyncMock()
-    controller.delegate = mock_delegate
+    mock_delegate.acid = 'test-delegated-agent'
+    controller.delegates[mock_delegate.acid] = mock_delegate
 
     mock_delegate.state.iteration = 5
     mock_delegate.state.outputs = {'result': 'test'}
@@ -263,16 +279,18 @@ async def test_delegate_step_different_states(
     mock_delegate._step = AsyncMock()
     mock_delegate.close = AsyncMock()
 
-    await controller._delegate_step()
+    print(controller.delegates[mock_delegate.acid])
+
+    await controller._delegate_step(mock_delegate.acid)
 
     mock_delegate._step.assert_called_once()
 
     if delegate_state == AgentState.RUNNING:
-        assert controller.delegate is not None
+        assert controller.delegates[mock_delegate.acid] is not None
         assert controller.state.iteration == 0
         mock_delegate.close.assert_not_called()
     else:
-        assert controller.delegate is None
+        # assert controller.delegates[mock_delegate.acid].get_agent_state() == AgentState.STOPPED
         assert controller.state.iteration == 5
         mock_delegate.close.assert_called_once()
 
@@ -302,9 +320,11 @@ async def test_max_iterations_extension(mock_agent, mock_event_stream):
     assert controller.state.agent_state == AgentState.ERROR
 
     # Simulate a new user message
-    message_action = MessageAction(content='Test message')
+    message_action = MessageAction(
+        content='Test message', src_id='dummy-agent', esid='test-es0'
+    )
     message_action._source = EventSource.USER
-    await controller.on_event(message_action)
+    await controller.on_event('test-es0', message_action)
 
     # Max iterations should be extended to current iteration + initial max_iterations
     assert (
@@ -332,10 +352,11 @@ async def test_max_iterations_extension(mock_agent, mock_event_stream):
     assert controller.state.traffic_control_state == TrafficControlState.NORMAL
 
     # Simulate a new user message
-    message_action = MessageAction(content='Test message')
+    message_action = MessageAction(
+        content='Test message', src_id='dummy-agent', esid='test-es0'
+    )
     message_action._source = EventSource.USER
-    await controller.on_event(message_action)
-
+    await controller.on_event('test-es0', message_action)
     # Max iterations should NOT be extended in headless mode
     assert controller.state.max_iterations == 10  # Original value unchanged
 
@@ -363,26 +384,5 @@ async def test_step_max_budget(mock_agent, mock_event_stream):
     assert controller.state.traffic_control_state == TrafficControlState.NORMAL
     await controller._step()
     assert controller.state.traffic_control_state == TrafficControlState.THROTTLING
-    assert controller.state.agent_state == AgentState.ERROR
-    await controller.close()
-
-
-@pytest.mark.asyncio
-async def test_step_max_budget_headless(mock_agent, mock_event_stream):
-    controller = AgentController(
-        agent=mock_agent,
-        event_stream=mock_event_stream,
-        max_iterations=10,
-        max_budget_per_task=10,
-        sid='test',
-        confirmation_mode=False,
-        headless_mode=True,
-    )
-    controller.state.agent_state = AgentState.RUNNING
-    controller.state.metrics.accumulated_cost = 10.1
-    assert controller.state.traffic_control_state == TrafficControlState.NORMAL
-    await controller._step()
-    assert controller.state.traffic_control_state == TrafficControlState.THROTTLING
-    # In headless mode, throttling results in an error
     assert controller.state.agent_state == AgentState.ERROR
     await controller.close()

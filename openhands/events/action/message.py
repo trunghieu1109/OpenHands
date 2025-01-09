@@ -6,11 +6,13 @@ from openhands.events.action.action import Action, ActionSecurityRisk
 
 @dataclass
 class MessageAction(Action):
-    content: str
+    content: str = ''
     image_urls: list[str] | None = None
     wait_for_response: bool = False
     action: str = ActionType.MESSAGE
     security_risk: ActionSecurityRisk | None = None
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:

@@ -9,6 +9,8 @@ class NullAction(Action):
     """An action that does nothing."""
 
     action: str = ActionType.NULL
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:

@@ -11,6 +11,8 @@ class NullObservation(Observation):
     """
 
     observation: str = ObservationType.NULL
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:

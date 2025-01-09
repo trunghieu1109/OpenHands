@@ -9,9 +9,11 @@ from openhands.events.action.action import Action
 class ChangeAgentStateAction(Action):
     """Fake action, just to notify the client that a task state has changed."""
 
-    agent_state: str
+    agent_state: str = ''
     thought: str = ''
     action: str = ActionType.CHANGE_AGENT_STATE
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:
@@ -20,8 +22,10 @@ class ChangeAgentStateAction(Action):
 
 @dataclass
 class AgentSummarizeAction(Action):
-    summary: str
+    summary: str = ''
     action: str = ActionType.SUMMARIZE
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:
@@ -46,6 +50,8 @@ class AgentFinishAction(Action):
     outputs: dict[str, Any] = field(default_factory=dict)
     thought: str = ''
     action: str = ActionType.FINISH
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:
@@ -59,6 +65,8 @@ class AgentRejectAction(Action):
     outputs: dict = field(default_factory=dict)
     thought: str = ''
     action: str = ActionType.REJECT
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:
@@ -70,10 +78,12 @@ class AgentRejectAction(Action):
 
 @dataclass
 class AgentDelegateAction(Action):
-    agent: str
-    inputs: dict
+    agent: str = ''
+    inputs: dict = field(default_factory=dict)
     thought: str = ''
     action: str = ActionType.DELEGATE
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:

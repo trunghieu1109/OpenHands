@@ -71,7 +71,7 @@ def create_runtime(
 
     # set up the event stream
     file_store = get_file_store(config.file_store, config.file_store_path)
-    event_stream = EventStream(session_id, file_store)
+    event_stream = EventStream(session_id, session_id + '-es0', file_store)
 
     # agent class
     agent_cls = openhands.agenthub.Agent.get_cls(config.default_agent)
@@ -132,7 +132,9 @@ async def run_controller(
         runtime = create_runtime(config, sid=sid, headless_mode=headless_mode)
         await runtime.connect()
 
-    event_stream = runtime.event_stream
+    for value in runtime.event_stream.values():
+        event_stream = value
+        break
 
     # restore cli session if available
     initial_state = None
@@ -148,7 +150,9 @@ async def run_controller(
 
     # init controller with this initial state
     controller = AgentController(
+        acid=sid + '-ac0',
         agent=agent,
+        runtime=runtime,
         max_iterations=config.max_iterations,
         max_budget_per_task=config.max_budget_per_task,
         agent_to_llm_config=config.get_agent_to_llm_config_map(),
@@ -175,14 +179,17 @@ async def run_controller(
                     "Let's get back on track. If you experienced errors before, do "
                     'NOT resume your task. Ask me about it.'
                 ),
+                src_id='main',
+                esid=event_stream.esid,
             ),
             EventSource.USER,
         )
     else:
         # init with the provided actions
+        initial_user_action.esid = event_stream.esid
         event_stream.add_event(initial_user_action, EventSource.USER)
 
-    async def on_event(event: Event):
+    async def on_event(esid: str, event: Event):
         if isinstance(event, AgentStateChangedObservation):
             if event.agent_state == AgentState.AWAITING_USER_INPUT:
                 if exit_on_message:
@@ -193,7 +200,9 @@ async def run_controller(
                     message = sys.stdin.read().rstrip()
                 else:
                     message = fake_user_response_fn(controller.get_state())
-                action = MessageAction(content=message)
+                action = MessageAction(
+                    content=message, src_id='main', esid=event_stream.esid
+                )
                 event_stream.add_event(action, EventSource.USER)
 
     event_stream.subscribe(EventStreamSubscriber.MAIN, on_event, sid)
@@ -266,7 +275,7 @@ if __name__ == '__main__':
         task_str = read_task_from_stdin()
     else:
         raise ValueError('No task provided. Please specify a task through -t, -f.')
-    initial_user_action: MessageAction = MessageAction(content=task_str)
+    initial_user_action: MessageAction = MessageAction(content=task_str, src_id='main')
     # Load the app config
     # this will load config from config.toml in the current directory
     # as well as from the environment variables

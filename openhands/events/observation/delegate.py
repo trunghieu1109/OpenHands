@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from openhands.core.schema import ObservationType
 from openhands.events.observation.observation import Observation
@@ -14,8 +14,10 @@ class AgentDelegateObservation(Observation):
         observation (str): The type of observation.
     """
 
-    outputs: dict
+    outputs: dict = field(default_factory=dict)
     observation: str = ObservationType.DELEGATE
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:

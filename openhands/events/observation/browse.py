@@ -10,9 +10,9 @@ from openhands.events.observation.observation import Observation
 class BrowserOutputObservation(Observation):
     """This data class represents the output of a browser."""
 
-    url: str
-    trigger_by_action: str
-    screenshot: str = field(repr=False)  # don't show in repr
+    url: str = ''
+    trigger_by_action: str = ''
+    screenshot: str = field(default_factory=str, repr=False)  # don't show in repr
     error: bool = False
     observation: str = ObservationType.BROWSE
     # do not include in the memory
@@ -26,6 +26,8 @@ class BrowserOutputObservation(Observation):
     last_browser_action: str = ''
     last_browser_action_error: str = ''
     focused_element_bid: str = ''
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:

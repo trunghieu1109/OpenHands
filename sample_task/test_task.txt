@@ -1,0 +1,8 @@
+Build a simple todo application containing following features:
+- Create new task. Each task includes header, description, due date
+- Delete task
+- Edit task's description
+- Sort tasks based on header and due date
+- Search tasks based on header
+- Show all task
+This application has frontend with user-friendly UI, and does not contain backend.

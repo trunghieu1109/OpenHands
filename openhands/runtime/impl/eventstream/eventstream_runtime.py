@@ -111,7 +111,7 @@ class EventStreamRuntime(Runtime):
         self._container_port = 30001  # initial dummy value
         self._vscode_url: str | None = None  # initial dummy value
         self._runtime_initialized: bool = False
-        self.api_url = f'{self.config.sandbox.local_runtime_url}:{self._container_port}'
+        self.api_url = f'http://host.docker.internal:{self._container_port}'
         self.session = requests.Session()
         self.status_callback = status_callback
 
@@ -225,7 +225,7 @@ class EventStreamRuntime(Runtime):
         self._container_port = (
             self._host_port
         )  # in future this might differ from host port
-        self.api_url = f'{self.config.sandbox.local_runtime_url}:{self._container_port}'
+        self.api_url = f'http://host.docker.internal:{self._container_port}'
 
         use_host_network = self.config.sandbox.use_host_network
         network_mode: str | None = 'host' if use_host_network else None
@@ -340,7 +340,7 @@ class EventStreamRuntime(Runtime):
             self._container_port = int(port.split('/')[0])
             break
         self._host_port = self._container_port
-        self.api_url = f'{self.config.sandbox.local_runtime_url}:{self._container_port}'
+        self.api_url = f'http://host.docker.internal:{self._container_port}'
         self.log(
             'debug',
             f'attached to container: {self.container_name} {self._container_port} {self.api_url}',
@@ -407,19 +407,21 @@ class EventStreamRuntime(Runtime):
 
         with self.action_semaphore:
             if not action.runnable:
-                return NullObservation('')
+                return NullObservation(content='', src_id='runtime', esid=action.esid)
             if (
                 hasattr(action, 'confirmation_state')
                 and action.confirmation_state
                 == ActionConfirmationStatus.AWAITING_CONFIRMATION
             ):
-                return NullObservation('')
+                return NullObservation(content='', src_id='runtime', esid=action.esid)
             action_type = action.action  # type: ignore[attr-defined]
             if action_type not in ACTION_TYPE_TO_CLASS:
                 raise ValueError(f'Action {action_type} does not exist.')
             if not hasattr(self, action_type):
                 return ErrorObservation(
-                    f'Action {action_type} is not supported in the current runtime.',
+                    content=f'Action {action_type} is not supported in the current runtime.',
+                    src_id='runtime',
+                    esid=action.esid,
                     error_id='AGENT_ERROR$BAD_ACTION',
                 )
             if (
@@ -427,22 +429,30 @@ class EventStreamRuntime(Runtime):
                 == ActionConfirmationStatus.REJECTED
             ):
                 return UserRejectObservation(
-                    'Action has been rejected by the user! Waiting for further user input.'
+                    content='Action has been rejected by the user! Waiting for further user input.',
+                    src_id='runtime',
+                    esid=action.esid,
                 )
 
             assert action.timeout is not None
+
+            action_dict = event_to_dict(action)
+            del action_dict['args']['src_id']
+            del action_dict['args']['esid']
 
             try:
                 with send_request(
                     self.session,
                     'POST',
                     f'{self.api_url}/execute_action',
-                    json={'action': event_to_dict(action)},
+                    json={'action': action_dict},
                     # wait a few more seconds to get the timeout error from client side
                     timeout=action.timeout + 5,
                 ) as response:
                     output = response.json()
                     obs = observation_from_dict(output)
+                    obs.src_id = action.src_id
+                    obs.esid = action.esid
                     obs._cause = action.id  # type: ignore[attr-defined]
             except requests.Timeout:
                 raise RuntimeError(

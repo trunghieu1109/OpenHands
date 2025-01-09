@@ -62,7 +62,12 @@ class Session:
 
     async def initialize_agent(self, session_init_data: SessionInitData):
         self.agent_session.event_stream.add_event(
-            AgentStateChangedObservation('', AgentState.LOADING),
+            AgentStateChangedObservation(
+                content='',
+                src_id='session',
+                esid=self.agent_session.event_stream.esid,
+                agent_state=AgentState.LOADING,
+            ),
             EventSource.ENVIRONMENT,
         )
         # Extract the agent-relevant arguments from the request
@@ -115,7 +120,7 @@ class Session:
             )
             return
 
-    async def on_event(self, event: Event):
+    async def on_event(self, esid: str, event: Event):
         """Callback function for events that mainly come from the agent.
         Event is the base class for any agent action and observation.
 

@@ -357,6 +357,9 @@ class CodeActAgent(Agent):
 
         # prepare what we want to send to the LLM
         messages = self._get_messages(state)
+
+        # print(messages)
+
         params: dict = {
             'messages': self.llm.format_messages_for_llm(messages),
         }
@@ -367,6 +370,9 @@ class CodeActAgent(Agent):
         actions = codeact_function_calling.response_to_actions(response)
         for action in actions:
             self.pending_actions.append(action)
+
+        print(actions)
+
         return self.pending_actions.popleft()
 
     def _get_messages(self, state: State) -> list[Message]:

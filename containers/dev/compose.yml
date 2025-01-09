@@ -15,7 +15,7 @@ services:
       - SANDBOX_USER_ID=${SANDBOX_USER_ID:-1234}
       - WORKSPACE_MOUNT_PATH=${WORKSPACE_BASE:-$PWD/workspace}
     ports:
-      - "3000:3000"
+      - "3510:3000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -24,9 +24,9 @@ services:
       # source code
       - ${OPENHANDS_WORKSPACE:-../../}:/app
       # host credentials
-      - $HOME/.git-credentials:/root/.git-credentials:ro
-      - $HOME/.gitconfig:/root/.gitconfig:ro
-      - $HOME/.npmrc:/root/.npmrc:ro
+      - $HOME/.git-credentials:/root/.git-credentials
+      - $HOME/.gitconfig:/root/.gitconfig
+      - $HOME/.npmrc:/root/.npmrc
       # cache
       - cache-data:/root/.cache
     pull_policy: never

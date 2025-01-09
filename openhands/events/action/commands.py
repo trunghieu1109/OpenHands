@@ -11,7 +11,7 @@ from openhands.events.action.action import (
 
 @dataclass
 class CmdRunAction(Action):
-    command: str
+    command: str = ''
     thought: str = ''
     blocking: bool = False
     # If False, the command will be run in a non-blocking / interactive way
@@ -30,6 +30,8 @@ class CmdRunAction(Action):
     runnable: ClassVar[bool] = True
     confirmation_state: ActionConfirmationStatus = ActionConfirmationStatus.CONFIRMED
     security_risk: ActionSecurityRisk | None = None
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:
@@ -45,7 +47,7 @@ class CmdRunAction(Action):
 
 @dataclass
 class IPythonRunCellAction(Action):
-    code: str
+    code: str = ''
     thought: str = ''
     include_extra: bool = (
         True  # whether to include CWD & Python interpreter in the output
@@ -55,6 +57,8 @@ class IPythonRunCellAction(Action):
     confirmation_state: ActionConfirmationStatus = ActionConfirmationStatus.CONFIRMED
     security_risk: ActionSecurityRisk | None = None
     kernel_init_code: str = ''  # code to run in the kernel (if the kernel is restarted)
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     def __str__(self) -> str:
         ret = '**IPythonRunCellAction**\n'

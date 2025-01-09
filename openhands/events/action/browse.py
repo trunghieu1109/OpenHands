@@ -7,11 +7,13 @@ from openhands.events.action.action import Action, ActionSecurityRisk
 
 @dataclass
 class BrowseURLAction(Action):
-    url: str
+    url: str = ''
     thought: str = ''
     action: str = ActionType.BROWSE
     runnable: ClassVar[bool] = True
     security_risk: ActionSecurityRisk | None = None
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:
@@ -27,12 +29,14 @@ class BrowseURLAction(Action):
 
 @dataclass
 class BrowseInteractiveAction(Action):
-    browser_actions: str
+    browser_actions: str = ''
     thought: str = ''
     browsergym_send_msg_to_user: str = ''
     action: str = ActionType.BROWSE_INTERACTIVE
     runnable: ClassVar[bool] = True
     security_risk: ActionSecurityRisk | None = None
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:

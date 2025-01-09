@@ -9,8 +9,10 @@ from openhands.events.observation.observation import Observation
 class FileReadObservation(Observation):
     """This data class represents the content of a file."""
 
-    path: str
+    path: str = ''
     observation: str = ObservationType.READ
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:
@@ -21,8 +23,10 @@ class FileReadObservation(Observation):
 class FileWriteObservation(Observation):
     """This data class represents a file write operation"""
 
-    path: str
+    path: str = ''
     observation: str = ObservationType.WRITE
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:
@@ -34,11 +38,13 @@ class FileEditObservation(Observation):
     """This data class represents a file edit operation"""
 
     # content: str will be a unified diff patch string include NO context lines
-    path: str
-    prev_exist: bool
-    old_content: str
-    new_content: str
+    path: str = ''
+    prev_exist: bool = False
+    old_content: str = ''
+    new_content: str = ''
     observation: str = ObservationType.EDIT
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:

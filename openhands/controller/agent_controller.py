@@ -45,7 +45,9 @@ from openhands.events.observation import (
     Observation,
 )
 from openhands.events.serialization.event import truncate_content
+from openhands.group import AgentGroup
 from openhands.llm.llm import LLM
+from openhands.runtime.base import Runtime
 from openhands.utils.shutdown_listener import should_continue
 
 # note: RESUME is only available on web GUI
@@ -56,16 +58,19 @@ TRAFFIC_CONTROL_REMINDER = (
 
 class AgentController:
     id: str
+    acid: str
     agent: Agent
     max_iterations: int
     event_stream: EventStream
+    runtime: Runtime
     state: State
     confirmation_mode: bool
+    delegates: dict[str, 'AgentController']
     agent_to_llm_config: dict[str, LLMConfig]
     agent_configs: dict[str, AgentConfig]
+    agent_group: AgentGroup | None = None
     agent_task: asyncio.Future | None = None
     parent: 'AgentController | None' = None
-    delegate: 'AgentController | None' = None
     _pending_action: Action | None = None
     _closed: bool = False
     filter_out: ClassVar[tuple[type[Event], ...]] = (
@@ -78,12 +83,14 @@ class AgentController:
     def __init__(
         self,
         agent: Agent,
-        event_stream: EventStream,
+        event_stream: EventStream,  # event stream that related to its boss
         max_iterations: int,
+        runtime: Runtime,
         max_budget_per_task: float | None = None,
         agent_to_llm_config: dict[str, LLMConfig] | None = None,
         agent_configs: dict[str, AgentConfig] | None = None,
         sid: str = 'default',
+        acid: str = 'default',
         confirmation_mode: bool = False,
         initial_state: State | None = None,
         is_delegate: bool = False,
@@ -110,14 +117,14 @@ class AgentController:
         """
         self._step_lock = asyncio.Lock()
         self.id = sid
+        self.acid = acid
         self.agent = agent
         self.headless_mode = headless_mode
+        self.delegates = {}
+        self.runtime = runtime
 
         # subscribe to the event stream
         self.event_stream = event_stream
-        self.event_stream.subscribe(
-            EventStreamSubscriber.AGENT_CONTROLLER, self.on_event, self.id
-        )
 
         # state from the previous session, state from a parent agent, or a fresh state
         self.set_initial_state(
@@ -165,8 +172,35 @@ class AgentController:
         )
 
         # unsubscribe from the event stream
-        self.event_stream.unsubscribe(EventStreamSubscriber.AGENT_CONTROLLER, self.id)
+        self.event_stream.unsubscribe(EventStreamSubscriber.AGENT_CONTROLLER, self.acid)
+
+        if self.agent_group is not None:
+            group_start_id = (
+                self.state.group_history.start_id
+                if self.state.group_history.start_id >= 0
+                else 0
+            )
+            group_end_id = (
+                self.state.group_history.end_id
+                if self.state.group_history.end_id >= 0
+                else self.agent_group.event_stream.get_latest_event_id()
+            )
+            self.state.group_history.events = list(
+                self.agent_group.event_stream.get_events(
+                    start_id=group_start_id,
+                    end_id=group_end_id,
+                    reverse=False,
+                    filter_out_type=self.filter_out,
+                    filter_hidden=True,
+                )
+            )
+
+            # self.agent_group.event_stream.unsubscribe(EventStreamSubscriber.AGENT_CONTROLLER, self.acid)
+
         self._closed = True
+
+    def set_event_stream(self, event_stream: EventStream):
+        self.event_stream = event_stream
 
     def log(self, level: str, message: str, extra: dict | None = None) -> None:
         """Logs a message to the agent controller's logger.
@@ -218,7 +252,7 @@ class AgentController:
 
             await asyncio.sleep(0.1)
 
-    async def on_event(self, event: Event) -> None:
+    async def on_event(self, esid: str, event: Event) -> None:
         """Callback from the event stream. Notifies the controller of incoming events.
 
         Args:
@@ -227,9 +261,19 @@ class AgentController:
         if hasattr(event, 'hidden') and event.hidden:
             return
 
-        # if the event is not filtered out, add it to the history
-        if not any(isinstance(event, filter_type) for filter_type in self.filter_out):
+        # if the event is not filtered out, add it to the history. Specifically, this function adds events to event history of the main event stream
+        if (
+            not any(isinstance(event, filter_type) for filter_type in self.filter_out)
+            and esid == self.event_stream.esid
+        ):
             self.state.history.append(event)
+
+        # This function would add event to suitable event stream, based on esid
+        if self.agent_group and esid == self.agent_group.event_stream.esid:
+            if not any(
+                isinstance(event, filter_type) for filter_type in self.filter_out
+            ):
+                self.state.group_history.events.append(event)
 
         if isinstance(event, Action):
             await self._handle_action(event)
@@ -283,7 +327,11 @@ class AgentController:
         if observation.llm_metrics is not None:
             self.agent.llm.metrics.merge(observation.llm_metrics)
 
-        if self._pending_action and self._pending_action.id == observation.cause:
+        if (
+            self._pending_action
+            and self._pending_action.id == observation.cause
+            and self._pending_action.esid == observation.esid
+        ):
             if self.state.agent_state == AgentState.AWAITING_USER_CONFIRMATION:
                 return
             self._pending_action = None
@@ -393,7 +441,12 @@ class AgentController:
 
         self.state.agent_state = new_state
         self.event_stream.add_event(
-            AgentStateChangedObservation('', self.state.agent_state),
+            AgentStateChangedObservation(
+                content='',
+                agent_state=self.state.agent_state,
+                src_id=self.acid,
+                esid=self.event_stream.esid,
+            ),
             EventSource.ENVIRONMENT,
         )
 
@@ -425,6 +478,11 @@ class AgentController:
         Args:
             action (AgentDelegateAction): The action containing information about the delegate agent to start.
         """
+
+        print(80 * '*')
+        print('START DELEGATE')
+        print(80 * '*')
+
         agent_cls: Type[Agent] = Agent.get_cls(action.agent)
         agent_config = self.agent_configs.get(action.agent, self.agent.config)
         llm_config = self.agent_to_llm_config.get(action.agent, self.agent.llm.config)
@@ -438,28 +496,83 @@ class AgentController:
             delegate_level=self.state.delegate_level + 1,
             # global metrics should be shared between parent and child
             metrics=self.state.metrics,
-            # start on top of the stream
-            start_id=self.event_stream.get_latest_event_id() + 1,
         )
         self.log(
             'debug',
             f'start delegate, creating agent {delegate_agent.name} using LLM {llm}',
         )
 
-        self.event_stream.unsubscribe(EventStreamSubscriber.AGENT_CONTROLLER, self.id)
-        self.delegate = AgentController(
-            sid=self.id + '-delegate',
-            agent=delegate_agent,
-            event_stream=self.event_stream,
-            max_iterations=self.state.max_iterations,
-            max_budget_per_task=self.max_budget_per_task,
-            agent_to_llm_config=self.agent_to_llm_config,
-            agent_configs=self.agent_configs,
-            initial_state=state,
-            is_delegate=True,
-            headless_mode=self.headless_mode,
-        )
-        await self.delegate.set_agent_state_to(AgentState.RUNNING)
+        self.event_stream.unsubscribe(EventStreamSubscriber.AGENT_CONTROLLER, self.acid)
+
+        new_acid = self.acid + '-delegated-' + delegate_agent.name
+
+        if self.agent_group is None:
+            esid = self.acid + '-group_es'
+
+            event_stream = EventStream(self.id, esid, self.event_stream.file_store)
+
+            gid = self.acid + '-group'
+
+            group = AgentGroup(
+                sid=self.id,
+                gid=gid,
+                manager_id=self.acid,
+                init_group_task=self.state.root_task.get_current_task(),
+                event_stream=event_stream,
+            )
+
+            self.agent_group = group
+
+            self.runtime.add_event_stream(event_stream)
+
+            state.start_id = 0
+
+        state.start_id = self.agent_group.event_stream.get_latest_event_id() + 1
+
+        if new_acid in self.agent_group.members:
+            self.delegates[new_acid].set_initial_state(
+                state=state,
+                max_iterations=self.state.max_iterations,
+                confirmation_mode=self.state.confirmation_mode,
+            )
+
+            # self.delegates[new_acid].event_stream.subscribe(
+            #     EventStreamSubscriber.AGENT_CONTROLLER,
+            #     self.delegates[new_acid].event_stream.esid,
+            #     self.event_stream.file_store,
+            # )
+
+        else:
+            # self.event_stream.unsubscribe(EventStreamSubscriber.AGENT_CONTROLLER, self.acid)
+            delegate_controller = AgentController(
+                sid=self.id + '-delegate',
+                acid=new_acid,
+                agent=delegate_agent,
+                event_stream=self.agent_group.event_stream,
+                runtime=self.runtime,
+                max_iterations=self.state.max_iterations,
+                max_budget_per_task=self.max_budget_per_task,
+                agent_to_llm_config=self.agent_to_llm_config,
+                agent_configs=self.agent_configs,
+                initial_state=state,
+                is_delegate=True,
+                headless_mode=self.headless_mode,
+            )
+
+            self.delegates[new_acid] = delegate_controller
+
+            self.agent_group.add_member(new_acid)
+
+        delegated_task = self.delegates[new_acid].state.root_task.get_current_task()
+
+        if delegated_task:
+            self.agent_group.group_tasks[new_acid] = delegated_task
+
+        self.state.group_history.group_tasks = self.agent_group.group_tasks
+
+        self.delegates[new_acid].state.current_group_task = self.agent_group.group_tasks
+
+        # await self.delegates[new_acid].set_agent_state_to(AgentState.RUNNING)
 
     async def _step(self) -> None:
         """Executes a single step of the parent or delegate agent. Detects stuck agents and limits on the number of iterations and the task budget."""
@@ -471,13 +584,18 @@ class AgentController:
             await asyncio.sleep(1)
             return
 
-        if self.delegate is not None:
-            assert self.delegate != self
-            if self.delegate.get_agent_state() == AgentState.PAUSED:
-                # no need to check too often
-                await asyncio.sleep(1)
-            else:
-                await self._delegate_step()
+        if self.delegates:
+            assert self.acid not in self.delegates
+
+            tasks = []
+
+            for value in self.delegates.values():
+                if self.delegates[value.acid].get_agent_state() != AgentState.PAUSED:
+                    task = asyncio.create_task(self._delegate_step(value.acid))
+                    tasks.append(task)
+
+            await asyncio.gather(*tasks)
+
             return
 
         self.log(
@@ -506,11 +624,13 @@ class AgentController:
             return
 
         self.update_state_before_step()
-        action: Action = NullAction()
+        action: Action = NullAction(src_id=self.acid, esid=self.event_stream.esid)
         try:
             action = self.agent.step(self.state)
             if action is None:
                 raise LLMNoActionError('No action was returned')
+            action.esid = self.event_stream.esid
+            action.src_id = self.acid
         except (
             LLMMalformedActionError,
             LLMNoActionError,
@@ -520,7 +640,7 @@ class AgentController:
         ) as e:
             self.event_stream.add_event(
                 ErrorObservation(
-                    content=str(e),
+                    content=str(e), src_id=self.acid, esid=self.event_stream.esid
                 ),
                 EventSource.AGENT,
             )
@@ -536,6 +656,14 @@ class AgentController:
             ):
                 # When context window is exceeded, keep roughly half of agent interactions
                 self.state.history = self._apply_conversation_window(self.state.history)
+                if self.agent_group:
+                    self.state.group_history.events = self._apply_conversation_window(
+                        self.state.group_history.events
+                    )
+                    if self.state.group_history.events:
+                        self.state.group_history.start_id = (
+                            self.state.group_history.events[0].id
+                        )
 
                 # Save the ID of the first event in our truncated history for future reloading
                 if self.state.history:
@@ -567,50 +695,63 @@ class AgentController:
         log_level = 'info' if LOG_ALL_EVENTS else 'debug'
         self.log(log_level, str(action), extra={'msg_type': 'ACTION'})
 
-    async def _delegate_step(self) -> None:
+    async def _delegate_step(self, delegated_acid: str) -> None:
         """Executes a single step of the delegate agent."""
-        await self.delegate._step()  # type: ignore[union-attr]
-        assert self.delegate is not None
-        delegate_state = self.delegate.get_agent_state()
+        await self.delegates[delegated_acid]._step()  # type: ignore[union-attr]
+        assert self.delegates[delegated_acid] is not None
+        delegate_state = self.delegates[delegated_acid].get_agent_state()
         self.log('debug', f'Delegate state: {delegate_state}')
         if delegate_state == AgentState.ERROR:
             # update iteration that shall be shared across agents
-            self.state.iteration = self.delegate.state.iteration
+            self.state.iteration = self.delegates[delegated_acid].state.iteration
 
             # emit AgentDelegateObservation to mark delegate termination due to error
             delegate_outputs = (
-                self.delegate.state.outputs if self.delegate.state else {}
+                self.delegates[delegated_acid].state.outputs
+                if self.delegates[delegated_acid].state
+                else {}
             )
-            content = (
-                f'{self.delegate.agent.name} encountered an error during execution.'
+            content = f'{self.delegates[delegated_acid].agent.name} encountered an error during execution.'
+            obs = AgentDelegateObservation(
+                outputs=delegate_outputs,
+                content=content,
+                src_id=self.acid,
+                esid=self.event_stream.esid,
             )
-            obs = AgentDelegateObservation(outputs=delegate_outputs, content=content)
             self.event_stream.add_event(obs, EventSource.AGENT)
 
             # close the delegate upon error
-            await self.delegate.close()
+            await self.delegates[delegated_acid].close()
 
-            # resubscribe parent when delegate is finished
+            # # resubscribe parent when delegate is finished
             self.event_stream.subscribe(
-                EventStreamSubscriber.AGENT_CONTROLLER, self.on_event, self.id
+                EventStreamSubscriber.AGENT_CONTROLLER, self.on_event, self.acid
             )
-            self.delegate = None
-            self.delegateAction = None
+            # self.delegate = None
+            # self.delegateAction = None
 
         elif delegate_state in (AgentState.FINISHED, AgentState.REJECTED):
             self.log('debug', 'Delegate agent has finished execution')
             # retrieve delegate result
-            outputs = self.delegate.state.outputs if self.delegate.state else {}
+            outputs = (
+                self.delegates[delegated_acid].state.outputs
+                if self.delegates[delegated_acid].state
+                else {}
+            )
 
             # update iteration that shall be shared across agents
-            self.state.iteration = self.delegate.state.iteration
+            self.state.iteration = self.delegates[delegated_acid].state.iteration
 
             # close delegate controller: we must close the delegate controller before adding new events
-            await self.delegate.close()
+            await self.delegates[delegated_acid].close()
+
+            if self.agent_group:
+                del self.agent_group.group_tasks[delegated_acid]
+                del self.state.group_history.group_tasks[delegated_acid]
 
             # resubscribe parent when delegate is finished
             self.event_stream.subscribe(
-                EventStreamSubscriber.AGENT_CONTROLLER, self.on_event, self.id
+                EventStreamSubscriber.AGENT_CONTROLLER, self.on_event, self.acid
             )
 
             # update delegate result observation
@@ -618,14 +759,17 @@ class AgentController:
             formatted_output = ', '.join(
                 f'{key}: {value}' for key, value in outputs.items()
             )
-            content = (
-                f'{self.delegate.agent.name} finishes task with {formatted_output}'
+            content = f'{self.delegates[delegated_acid].agent.name} finishes task with {formatted_output}'
+            obs = AgentDelegateObservation(
+                outputs=outputs,
+                content=content,
+                src_id=self.acid,
+                esid=self.event_stream.esid,
             )
-            obs = AgentDelegateObservation(outputs=outputs, content=content)
 
             # clean up delegate status
-            self.delegate = None
-            self.delegateAction = None
+            # self.delegate = None
+            # self.delegateAction = None
             self.event_stream.add_event(obs, EventSource.AGENT)
         return
 
@@ -696,6 +840,11 @@ class AgentController:
         # - the previous session, in which case it has history
         # - from a parent agent, in which case it has no history
         # - None / a new state
+
+        self.event_stream.subscribe(
+            EventStreamSubscriber.AGENT_CONTROLLER, self.on_event, self.acid
+        )
+
         if state is None:
             self.state = State(
                 inputs={},
@@ -710,10 +859,26 @@ class AgentController:
 
             self.log(
                 'debug',
-                f'AgentController {self.id} initializing history from event {self.state.start_id}',
+                f'AgentController {self.acid} initializing history from event {self.state.start_id}',
             )
 
             self._init_history()
+
+            self._init_group_history()
+
+        self.state.id = self.acid
+
+    def _init_group_history(self) -> None:
+        if self.agent_group:
+            self.state.group_history.group_tasks = self.agent_group.group_tasks
+            self.state.group_history.events = []
+            self.state.group_history.start_id = (
+                self.event_stream.get_latest_event_id() + 1
+            )
+            self.state.group_history.end_id = (
+                self.event_stream.get_latest_event_id() + 1
+            )
+            self.agent_group.group_tasks = {}
 
     def _init_history(self) -> None:
         """Initializes the agent's history from the event stream.
@@ -840,7 +1005,9 @@ class AgentController:
         # make sure history is in sync
         self.state.start_id = start_id
 
-    def _apply_conversation_window(self, events: list[Event]) -> list[Event]:
+    def _apply_conversation_window(
+        self, events: list[Event], tag: str = 'main'
+    ) -> list[Event]:
         """Cuts history roughly in half when context window is exceeded, preserving action-observation pairs
         and ensuring the first user message is always included.
 
@@ -912,17 +1079,18 @@ class AgentController:
                     # if it's an action with source == EventSource.AGENT, we're good
                     break
 
-        # Save where to continue from in next reload
-        if kept_events:
-            self.state.truncation_id = kept_events[0].id
+        if tag == 'main':
+            # Save where to continue from in next reload
+            if kept_events:
+                self.state.truncation_id = kept_events[0].id
 
-        # Ensure first user message is included
-        if first_user_msg and first_user_msg not in kept_events:
-            kept_events = [first_user_msg] + kept_events
+            # Ensure first user message is included
+            if first_user_msg and first_user_msg not in kept_events:
+                kept_events = [first_user_msg] + kept_events
 
-        # start_id points to first user message
-        if first_user_msg:
-            self.state.start_id = first_user_msg.id
+            # start_id points to first user message
+            if first_user_msg:
+                self.state.start_id = first_user_msg.id
 
         return kept_events
 
@@ -933,23 +1101,27 @@ class AgentController:
             bool: True if the agent is stuck, False otherwise.
         """
         # check if delegate stuck
-        if self.delegate and self.delegate._is_stuck():
-            return True
+
+        for value in self.delegates.values():
+            if self.delegates[value.acid] and self.delegates[value.acid]._is_stuck():
+                return True
 
         return self._stuck_detector.is_stuck(self.headless_mode)
 
     def __repr__(self):
         return (
-            f'AgentController(id={self.id}, agent={self.agent!r}, '
+            f'AgentController(id={self.acid}, agent={self.agent!r}, '
             f'event_stream={self.event_stream!r}, '
             f'state={self.state!r}, agent_task={self.agent_task!r}, '
-            f'delegate={self.delegate!r}, _pending_action={self._pending_action!r})'
+            f'delegate={self.delegates!r}, _pending_action={self._pending_action!r})'
         )
 
     def _is_awaiting_observation(self):
         events = self.event_stream.get_events(reverse=True)
         for event in events:
-            if isinstance(event, AgentStateChangedObservation):
+            if self.acid == event.src_id and isinstance(
+                event, AgentStateChangedObservation
+            ):
                 result = event.agent_state == AgentState.RUNNING
                 return result
         return False

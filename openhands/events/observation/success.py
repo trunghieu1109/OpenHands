@@ -9,6 +9,8 @@ class SuccessObservation(Observation):
     """This data class represents the result of a successful action."""
 
     observation: str = ObservationType.SUCCESS
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:

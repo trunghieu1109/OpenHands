@@ -14,6 +14,8 @@ class ErrorObservation(Observation):
 
     observation: str = ObservationType.ERROR
     error_id: str = ''
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:

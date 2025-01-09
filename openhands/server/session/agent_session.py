@@ -10,6 +10,7 @@ from openhands.core.schema.agent import AgentState
 from openhands.events.action import ChangeAgentStateAction
 from openhands.events.event import EventSource
 from openhands.events.stream import EventStream
+from openhands.group import AgentGroup
 from openhands.runtime import get_runtime_cls
 from openhands.runtime.base import Runtime, RuntimeUnavailableError
 from openhands.security import SecurityAnalyzer, options
@@ -30,7 +31,9 @@ class AgentSession:
 
     sid: str
     event_stream: EventStream
+    agent_controllers: dict[str, AgentController]
     file_store: FileStore
+    agent_group: AgentGroup
     controller: AgentController | None = None
     runtime: Runtime | None = None
     security_analyzer: SecurityAnalyzer | None = None
@@ -52,7 +55,9 @@ class AgentSession:
         """
 
         self.sid = sid
-        self.event_stream = EventStream(sid, file_store)
+        self.esid = sid + '-es0'
+        self.event_stream = EventStream(sid, self.esid, file_store)
+        self.agent_controllers = {}
         self.file_store = file_store
         self._status_callback = status_callback
 
@@ -138,7 +143,12 @@ class AgentSession:
             agent_configs=agent_configs,
         )
         self.event_stream.add_event(
-            ChangeAgentStateAction(AgentState.INIT), EventSource.ENVIRONMENT
+            ChangeAgentStateAction(
+                agent_state=AgentState.INIT,
+                src_id='agent-session',
+                esid=self.controller.event_stream.esid,
+            ),
+            EventSource.ENVIRONMENT,
         )
         self.controller.agent_task = self.controller.start_step_loop()
         self._initializing = False
@@ -164,10 +174,11 @@ class AgentSession:
                     f'Waited too long for initialization to finish before closing session {self.sid}'
                 )
                 break
-        if self.controller is not None:
-            end_state = self.controller.get_state()
-            end_state.save_to_session(self.sid, self.file_store)
-            await self.controller.close()
+        if self.agent_controllers is not None:
+            for ctrl in self.agent_controllers.values():
+                end_state = ctrl.get_state()
+                end_state.save_to_session(self.sid, self.file_store)
+                await ctrl.close()
         if self.runtime is not None:
             self.runtime.close()
         if self.security_analyzer is not None:
@@ -284,10 +295,13 @@ class AgentSession:
             '-------------------------------------------------------------------------------------------'
         )
         logger.debug(msg)
+        acid = self.sid + '-ac' + str(len(self.agent_controllers))
 
         controller = AgentController(
             sid=self.sid,
+            acid=acid,
             event_stream=self.event_stream,
+            runtime=self.runtime,
             agent=agent,
             max_iterations=int(max_iterations),
             max_budget_per_task=max_budget_per_task,
@@ -298,7 +312,7 @@ class AgentSession:
             status_callback=self._status_callback,
         )
         try:
-            agent_state = State.restore_from_session(self.sid, self.file_store)
+            agent_state = State.restore_from_session(self.sid, self.file_store, acid)
             controller.set_initial_state(agent_state, max_iterations, confirmation_mode)
             logger.debug(f'Restored agent state from session, sid: {self.sid}')
         except Exception as e:

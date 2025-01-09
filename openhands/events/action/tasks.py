@@ -6,11 +6,13 @@ from openhands.events.action.action import Action
 
 @dataclass
 class AddTaskAction(Action):
-    parent: str
-    goal: str
+    parent: str = ''
+    goal: str = ''
     subtasks: list = field(default_factory=list)
     thought: str = ''
     action: str = ActionType.ADD_TASK
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:
@@ -19,10 +21,12 @@ class AddTaskAction(Action):
 
 @dataclass
 class ModifyTaskAction(Action):
-    task_id: str
-    state: str
+    task_id: str = ''
+    state: str = ''
     thought: str = ''
     action: str = ActionType.MODIFY_TASK
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:

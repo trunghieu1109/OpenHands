@@ -12,13 +12,15 @@ class FileReadAction(Action):
     Default lines 0:-1 (whole file)
     """
 
-    path: str
+    path: str = ''
     start: int = 0
     end: int = -1
     thought: str = ''
     action: str = ActionType.READ
     runnable: ClassVar[bool] = True
     security_risk: ActionSecurityRisk | None = None
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:
@@ -32,14 +34,16 @@ class FileWriteAction(Action):
     Default lines 0:-1 (whole file)
     """
 
-    path: str
-    content: str
+    path: str = ''
+    content: str = ''
     start: int = 0
     end: int = -1
     thought: str = ''
     action: str = ActionType.WRITE
     runnable: ClassVar[bool] = True
     security_risk: ActionSecurityRisk | None = None
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def message(self) -> str:
@@ -56,14 +60,16 @@ class FileEditAction(Action):
     If start is set to -1, the FileEditAction will simply append the content to the file.
     """
 
-    path: str
-    content: str
+    path: str = ''
+    content: str = ''
     start: int = 1
     end: int = -1
     thought: str = ''
     action: str = ActionType.EDIT
     runnable: ClassVar[bool] = True
     security_risk: ActionSecurityRisk | None = None
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     def __repr__(self) -> str:
         ret = '**FileEditAction**\n'

@@ -1,0 +1,4 @@
+Please search for information about SanFrancisco's food. List them in this format, just 3 features:
+- <Feature>: <Information>
+
+Each information just bounded in 5 lines. USE DELEGATE ACTION "AgentDelegateAction" to search more effectively. After getting enough information, please write out to a file named "SanFrancisco_Food.txt".

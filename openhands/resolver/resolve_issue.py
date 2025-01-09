@@ -202,10 +202,11 @@ async def process_issue(
     runtime = create_runtime(config)
     await runtime.connect()
 
-    async def on_event(evt):
+    async def on_event(esid, evt):
         logger.info(evt)
 
-    runtime.event_stream.subscribe(EventStreamSubscriber.MAIN, on_event, str(uuid4()))
+    for value in runtime.event_stream.values():
+        value.subscribe(EventStreamSubscriber.MAIN, on_event, str(uuid4()))
 
     initialize_runtime(runtime)
 

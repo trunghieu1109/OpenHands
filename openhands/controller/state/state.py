@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from openhands.controller.state.task import RootTask
+from openhands.controller.state.task import RootTask, Task
 from openhands.core.logger import openhands_logger as logger
 from openhands.core.schema import AgentState
 from openhands.events.action import (
@@ -25,6 +25,13 @@ class TrafficControlState(str, Enum):
 
     # traffic control is temporarily paused
     PAUSED = 'paused'
+
+
+class GroupState:
+    group_tasks: dict[str, Task] = {}
+    events: list[Event] = []
+    start_id: int = 0
+    end_id: int = -1
 
 
 RESUMABLE_STATES = [
@@ -77,7 +84,11 @@ class State:
     # max number of iterations for the current task
     max_iterations: int = 100
     confirmation_mode: bool = False
-    history: list[Event] = field(default_factory=list)
+    history: list[Event] = field(
+        default_factory=list
+    )  # event history of current event stream, which used to transmit message to parent group
+    current_group_task: dict[str, Task] = field(default_factory=dict)
+    group_history: GroupState = field(default_factory=GroupState)
     inputs: dict = field(default_factory=dict)
     outputs: dict = field(default_factory=dict)
     agent_state: AgentState = AgentState.LOADING
@@ -94,6 +105,7 @@ class State:
     end_id: int = -1
     # truncation_id tracks where to load history after context window truncation
     truncation_id: int = -1
+    id: str = 'agent_state'
 
     delegates: dict[tuple[int, int], tuple[str, str]] = field(default_factory=dict)
     # NOTE: This will never be used by the controller, but it can be used by different
@@ -106,15 +118,18 @@ class State:
         logger.debug(f'Saving state to session {sid}:{self.agent_state}')
         encoded = base64.b64encode(pickled).decode('utf-8')
         try:
+            file_store.write(f'sessions/{sid}/agent_state{self.id}.pkl', encoded)
             file_store.write(f'sessions/{sid}/agent_state.pkl', encoded)
         except Exception as e:
             logger.error(f'Failed to save state to session: {e}')
             raise e
 
     @staticmethod
-    def restore_from_session(sid: str, file_store: FileStore) -> 'State':
+    def restore_from_session(
+        sid: str, file_store: FileStore, acid: str = ''
+    ) -> 'State':
         try:
-            encoded = file_store.read(f'sessions/{sid}/agent_state.pkl')
+            encoded = file_store.read(f'sessions/{sid}/agent_state{acid}.pkl')
             pickled = base64.b64decode(encoded)
             state = pickle.loads(pickled)
         except Exception as e:

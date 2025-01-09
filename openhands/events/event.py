@@ -14,6 +14,9 @@ class EventSource(str, Enum):
 
 @dataclass
 class Event:
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
+
     @property
     def message(self) -> str | None:
         if hasattr(self, '_message'):

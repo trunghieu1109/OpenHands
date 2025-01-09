@@ -22,17 +22,22 @@ def collect_events(stream):
 
 def test_basic_flow(temp_dir: str):
     file_store = get_file_store('local', temp_dir)
-    event_stream = EventStream('abc', file_store)
-    event_stream.add_event(NullAction(), EventSource.AGENT)
+    event_stream = EventStream('abc', 'abc-es0', file_store)
+    event_stream.add_event(
+        NullAction(src_id='dummy-agent', esid=event_stream.esid), EventSource.AGENT
+    )
     assert len(collect_events(event_stream)) == 1
 
 
 def test_stream_storage(temp_dir: str):
     file_store = get_file_store('local', temp_dir)
-    event_stream = EventStream('abc', file_store)
-    event_stream.add_event(NullObservation(''), EventSource.AGENT)
+    event_stream = EventStream('abc', 'abc-es0', file_store)
+    event_stream.add_event(
+        NullObservation('', src_id='dummy-agent', esid=event_stream.esid),
+        EventSource.AGENT,
+    )
     assert len(collect_events(event_stream)) == 1
-    content = event_stream.file_store.read('sessions/abc/events/0.json')
+    content = event_stream.file_store.read('sessions/abc/events/abc-es0/0.json')
     assert content is not None
     data = json.loads(content)
     assert 'timestamp' in data
@@ -42,22 +47,28 @@ def test_stream_storage(temp_dir: str):
         'source': 'agent',
         'observation': 'null',
         'content': '',
-        'extras': {},
+        'extras': {'src_id': 'dummy-agent', 'esid': 'abc-es0'},
         'message': 'No observation',
     }
 
 
 def test_rehydration(temp_dir: str):
     file_store = get_file_store('local', temp_dir)
-    event_stream = EventStream('abc', file_store)
-    event_stream.add_event(NullObservation('obs1'), EventSource.AGENT)
-    event_stream.add_event(NullObservation('obs2'), EventSource.AGENT)
+    event_stream = EventStream('abc', 'abc-es0', file_store)
+    event_stream.add_event(
+        NullObservation('obs1', src_id='dummy-agent', esid=event_stream.esid),
+        EventSource.AGENT,
+    )
+    event_stream.add_event(
+        NullObservation('obs2', src_id='dummy-agent', esid=event_stream.esid),
+        EventSource.AGENT,
+    )
     assert len(collect_events(event_stream)) == 2
 
-    stream2 = EventStream('es2', file_store)
+    stream2 = EventStream('es2', 'es2-es0', file_store)
     assert len(collect_events(stream2)) == 0
 
-    stream1rehydrated = EventStream('abc', file_store)
+    stream1rehydrated = EventStream('abc', 'abc-es0', file_store)
     events = collect_events(stream1rehydrated)
     assert len(events) == 2
     assert events[0].content == 'obs1'
@@ -66,13 +77,18 @@ def test_rehydration(temp_dir: str):
 
 def test_get_matching_events_type_filter(temp_dir: str):
     file_store = get_file_store('local', temp_dir)
-    event_stream = EventStream('abc', file_store)
-
+    event_stream = EventStream('abc', 'abc-es0', file_store)
     # Add mixed event types
-    event_stream.add_event(NullAction(), EventSource.AGENT)
-    event_stream.add_event(NullObservation('test'), EventSource.AGENT)
-    event_stream.add_event(NullAction(), EventSource.AGENT)
-
+    event_stream.add_event(
+        NullAction(src_id='dummy-agent', esid=event_stream.esid), EventSource.AGENT
+    )
+    event_stream.add_event(
+        NullObservation('test', src_id='dummy-agent', esid=event_stream.esid),
+        EventSource.AGENT,
+    )
+    event_stream.add_event(
+        NullAction(src_id='dummy-agent', esid=event_stream.esid), EventSource.AGENT
+    )
     # Filter by NullAction
     events = event_stream.get_matching_events(event_type='NullAction')
     assert len(events) == 2
@@ -86,11 +102,19 @@ def test_get_matching_events_type_filter(temp_dir: str):
 
 def test_get_matching_events_query_search(temp_dir: str):
     file_store = get_file_store('local', temp_dir)
-    event_stream = EventStream('abc', file_store)
-
-    event_stream.add_event(NullObservation('hello world'), EventSource.AGENT)
-    event_stream.add_event(NullObservation('test message'), EventSource.AGENT)
-    event_stream.add_event(NullObservation('another hello'), EventSource.AGENT)
+    event_stream = EventStream('abc', 'abc-es0', file_store)
+    event_stream.add_event(
+        NullObservation('hello world', src_id='dummy-agent', esid=event_stream.esid),
+        EventSource.AGENT,
+    )
+    event_stream.add_event(
+        NullObservation('test message', src_id='dummy-agent', esid=event_stream.esid),
+        EventSource.AGENT,
+    )
+    event_stream.add_event(
+        NullObservation('another hello', src_id='dummy-agent', esid=event_stream.esid),
+        EventSource.AGENT,
+    )
 
     # Search for 'hello'
     events = event_stream.get_matching_events(query='hello')
@@ -107,12 +131,20 @@ def test_get_matching_events_query_search(temp_dir: str):
 
 def test_get_matching_events_source_filter(temp_dir: str):
     file_store = get_file_store('local', temp_dir)
-    event_stream = EventStream('abc', file_store)
+    event_stream = EventStream('abc', 'abc-es0', file_store)
 
-    event_stream.add_event(NullObservation('test1'), EventSource.AGENT)
-    event_stream.add_event(NullObservation('test2'), EventSource.ENVIRONMENT)
-    event_stream.add_event(NullObservation('test3'), EventSource.AGENT)
-
+    event_stream.add_event(
+        NullObservation('test1', src_id='dummy-agent', esid=event_stream.esid),
+        EventSource.AGENT,
+    )
+    event_stream.add_event(
+        NullObservation('test2', src_id='dummy-agent', esid=event_stream.esid),
+        EventSource.ENVIRONMENT,
+    )
+    event_stream.add_event(
+        NullObservation('test3', src_id='dummy-agent', esid=event_stream.esid),
+        EventSource.AGENT,
+    )
     # Filter by AGENT source
     events = event_stream.get_matching_events(source='agent')
     assert len(events) == 2
@@ -126,11 +158,14 @@ def test_get_matching_events_source_filter(temp_dir: str):
 
 def test_get_matching_events_pagination(temp_dir: str):
     file_store = get_file_store('local', temp_dir)
-    event_stream = EventStream('abc', file_store)
+    event_stream = EventStream('abc', 'abc-es0', file_store)
 
     # Add 5 events
     for i in range(5):
-        event_stream.add_event(NullObservation(f'test{i}'), EventSource.AGENT)
+        event_stream.add_event(
+            NullObservation(f'test{i}', src_id='dummy-agent', esid=event_stream.esid),
+            EventSource.AGENT,
+        )
 
     # Test limit
     events = event_stream.get_matching_events(limit=3)
@@ -150,7 +185,7 @@ def test_get_matching_events_pagination(temp_dir: str):
 
 def test_get_matching_events_limit_validation(temp_dir: str):
     file_store = get_file_store('local', temp_dir)
-    event_stream = EventStream('abc', file_store)
+    event_stream = EventStream('abc', 'abc-es0', file_store)
 
     # Test limit less than 1
     with pytest.raises(ValueError, match='Limit must be between 1 and 100'):
@@ -161,7 +196,10 @@ def test_get_matching_events_limit_validation(temp_dir: str):
         event_stream.get_matching_events(limit=101)
 
     # Test valid limits work
-    event_stream.add_event(NullObservation('test'), EventSource.AGENT)
+    event_stream.add_event(
+        NullObservation('test', src_id='dummy-agent', esid=event_stream.esid),
+        EventSource.AGENT,
+    )
     events = event_stream.get_matching_events(limit=1)
     assert len(events) == 1
     events = event_stream.get_matching_events(limit=100)

@@ -123,7 +123,7 @@ async def main():
     )
 
     file_store = get_file_store(config.file_store, config.file_store_path)
-    event_stream = EventStream(sid, file_store)
+    event_stream = EventStream(sid, 'cli-es0', file_store)
 
     runtime_cls = get_runtime_cls(config.runtime)
     runtime: Runtime = runtime_cls(  # noqa: F841
@@ -140,7 +140,9 @@ async def main():
         )(event_stream)
 
     controller = AgentController(
+        acid=sid + '-ac0',
         agent=agent,
+        runtime=runtime,
         max_iterations=config.max_iterations,
         max_budget_per_task=config.max_budget_per_task,
         agent_to_llm_config=config.get_agent_to_llm_config_map(),
@@ -171,7 +173,7 @@ async def main():
         )
         return user_confirmation.lower() == 'y'
 
-    async def on_event(event: Event):
+    async def on_event(esid: str, event: Event):
         display_event(event, config)
         if isinstance(event, AgentStateChangedObservation):
             if event.agent_state in [

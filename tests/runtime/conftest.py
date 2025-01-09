@@ -256,7 +256,7 @@ def _load_runtime(
         config.sandbox.runtime_container_image = None
 
     file_store = get_file_store(config.file_store, config.file_store_path)
-    event_stream = EventStream(sid, file_store)
+    event_stream = EventStream(sid, sid + 'es0', file_store)
 
     runtime = runtime_cls(
         config=config,

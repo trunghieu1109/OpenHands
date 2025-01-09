@@ -23,7 +23,7 @@ class SecurityAnalyzer:
             EventStreamSubscriber.SECURITY_ANALYZER, self.on_event, str(uuid4())
         )
 
-    async def on_event(self, event: Event) -> None:
+    async def on_event(self, esid: str, event: Event) -> None:
         """Handles the incoming event, and when Action is received, analyzes it for security risks."""
         logger.debug(f'SecurityAnalyzer received event: {event}')
         await self.log_event(event)

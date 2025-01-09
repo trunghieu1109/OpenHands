@@ -8,12 +8,14 @@ from openhands.events.observation.observation import Observation
 class CmdOutputObservation(Observation):
     """This data class represents the output of a command."""
 
-    command_id: int
-    command: str
+    command_id: int = 0
+    command: str = ''
     exit_code: int = 0
     hidden: bool = False
     observation: str = ObservationType.RUN
     interpreter_details: str = ''
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def error(self) -> bool:
@@ -35,8 +37,10 @@ class CmdOutputObservation(Observation):
 class IPythonRunCellObservation(Observation):
     """This data class represents the output of a IPythonRunCellAction."""
 
-    code: str
+    code: str = ''
     observation: str = ObservationType.RUN_IPYTHON
+    src_id: str = 'default-es'
+    esid: str = 'default-es'
 
     @property
     def error(self) -> bool:

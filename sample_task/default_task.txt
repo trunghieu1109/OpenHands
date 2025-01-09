@@ -1,0 +1,10 @@
+You are a senior software engineering and have experience in some positions such as solution architecture, project manager, v.v. So, please build a todo application includes the following features:
+- Create new task with header, description, demonstrating image, v.v.
+- Delete task if I want.
+- Notify when task was due date.
+- Modify task.
+- Show all tasks.
+- Search tasks based on header.
+- Sort tasks based on header and due date.
+
+This app includes front-end and not back-end. Then, please create an user-friendly ui with html, css and js.

@@ -24,7 +24,7 @@ class Conversation:
         self.sid = sid
         self.config = config
         self.file_store = file_store
-        self.event_stream = EventStream(sid, file_store)
+        self.event_stream = EventStream(sid, sid + '-es0', file_store)
         if config.security.security_analyzer:
             self.security_analyzer = options.SecurityAnalyzers.get(
                 config.security.security_analyzer, SecurityAnalyzer

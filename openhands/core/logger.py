@@ -253,8 +253,8 @@ sys.excepthook = log_uncaught_exceptions
 openhands_logger = logging.getLogger('openhands')
 current_log_level = logging.INFO
 
-if LOG_LEVEL in logging.getLevelNamesMapping():
-    current_log_level = logging.getLevelNamesMapping()[LOG_LEVEL]
+# if LOG_LEVEL in logging.getLevelNamesMapping():
+#     current_log_level = logging.getLevelNamesMapping()[LOG_LEVEL]
 openhands_logger.setLevel(current_log_level)
 
 if current_log_level == logging.DEBUG:

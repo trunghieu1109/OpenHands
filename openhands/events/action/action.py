@@ -21,3 +21,5 @@ class ActionSecurityRisk(int, Enum):
 @dataclass
 class Action(Event):
     runnable: ClassVar[bool] = False
+    src_id: str = 'default-es'
+    esid: str = 'default-es'

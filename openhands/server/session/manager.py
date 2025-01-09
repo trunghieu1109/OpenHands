@@ -202,6 +202,7 @@ class SessionManager:
             except Exception:
                 logger.warning('error_cleaning_detached_conversations', exc_info=True)
                 await asyncio.sleep(15)
+
     async def init_or_join_session(
         self, sid: str, connection_id: str, session_init_data: SessionInitData
     ):
@@ -217,7 +218,7 @@ class SessionManager:
         # If there is a remote session running, retrieve existing events for that
         redis_client = self._get_redis_client()
         if redis_client and await self._is_session_running_in_cluster(sid):
-            return EventStream(sid, self.file_store)
+            return EventStream(sid, sid + '-es0', self.file_store)
 
         return await self.start_local_session(sid, session_init_data)
 
@@ -237,8 +238,8 @@ class SessionManager:
                     }
                 ),
             )
-            async with asyncio.timeout(_REDIS_POLL_TIMEOUT):
-                await flag.wait()
+            # async with asyncio.timeout(_REDIS_POLL_TIMEOUT):
+            #     await flag.wait()
 
             result = flag.is_set()
             return result
@@ -263,8 +264,8 @@ class SessionManager:
                     }
                 ),
             )
-            async with asyncio.timeout(_REDIS_POLL_TIMEOUT):
-                await flag.wait()
+            # async with asyncio.timeout(_REDIS_POLL_TIMEOUT):
+            #     await flag.wait()
 
             result = flag.is_set()
             return result
